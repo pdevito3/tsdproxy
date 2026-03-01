@@ -8,6 +8,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/almeidapaulopt/tsdproxy/internal/config"
 	"github.com/almeidapaulopt/tsdproxy/internal/model"
@@ -33,9 +34,21 @@ type (
 	}
 
 	oauth struct {
-		Authkey string `yaml:"authkey"`
+		Authkey string    `yaml:"authkey"`
+		Expires time.Time `yaml:"expires"`
 	}
 )
+
+const oauthExpiryBuffer = 5 * time.Minute
+
+// isExpired reports whether the cached OAuth key should be regenerated.
+// Zero Expires (legacy cache files) is treated as expired.
+func (o *oauth) isExpired() bool {
+	if o.Expires.IsZero() {
+		return true
+	}
+	return time.Now().Add(oauthExpiryBuffer).After(o.Expires)
+}
 
 var _ proxyproviders.Provider = (*Client)(nil)
 
@@ -122,7 +135,7 @@ func (c *Client) getOAuth(cfg *model.Config, dir string) string {
 
 	file := config.NewConfigFile(c.log, path.Join(dir, "tsdproxy.yaml"), data)
 	if err := file.Load(); err == nil {
-		if data.Authkey != "" {
+		if data.Authkey != "" && !data.isExpired() {
 			return data.Authkey
 		}
 	}
@@ -160,13 +173,14 @@ func (c *Client) getOAuth(cfg *model.Config, dir string) string {
 		Description:  "tsdproxy",
 	}
 
-	authkey, err := tsclient.Keys().Create(ctx, ckr)
+	authkey, err := tsclient.Keys().CreateAuthKey(ctx, ckr)
 	if err != nil {
 		c.log.Error().Err(err).Msg("unable to get Oauth token")
 		return ""
 	}
 
 	data.Authkey = authkey.Key
+	data.Expires = authkey.Expires
 	if err := file.Save(); err != nil {
 		c.log.Error().Err(err).Msg("unable to save oauth file")
 	}

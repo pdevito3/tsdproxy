@@ -114,6 +114,12 @@ func InitializeConfig() error {
 		fmt.Printf("Error loading defaults: %v", err)
 	}
 
+	// Apply environment variable overrides.
+	// Env vars override both the YAML file and struct defaults.
+	if err := applyEnvOverrides(Config); err != nil {
+		return err
+	}
+
 	// load auth keys from files
 	for _, d := range Config.Tailscale.Providers {
 		if d != nil && d.ClientSecret != "" && d.ClientID != "" {
