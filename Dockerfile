@@ -1,16 +1,33 @@
 
-# Usa uma imagem oficial do Go como base para a compilação
 FROM golang:1.24 AS builder
-RUN apk add --no-cache ca-certificates && update-ca-certificates 2>/dev/null || true
 
-# Define o diretório de trabalho
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates wget unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install bun
+RUN curl -fsSL https://bun.sh/install | bash
+ENV PATH="/root/.bun/bin:${PATH}"
+
+# Install templ
+RUN go install github.com/a-h/templ/cmd/templ@latest
+
 WORKDIR /app
 
-# Copia o código fonte para o container
+# Copy source
 COPY . .
 
-# Compila a aplicação Go
-RUN go mod tidy && CGO_ENABLED=0 GOOS=linux go build -o /tsdproxyd ./cmd/server/main.go
+# Install web dependencies
+RUN bun i --cwd ./web
+
+# Tidy modules
+RUN go mod tidy
+
+# Generate code (templ templates + web assets including icon download and vite build)
+RUN go generate ./...
+
+# Build binaries
+RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -o /tsdproxyd ./cmd/server/main.go
 RUN CGO_ENABLED=0 GOOS=linux go build -o /healthcheck ./cmd/healthcheck/main.go
 
 
