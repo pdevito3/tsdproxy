@@ -27,7 +27,10 @@ RUN go mod tidy
 RUN go generate ./...
 
 # Build binaries
-RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod -o /tsdproxyd ./cmd/server/main.go
+ARG VERSION=""
+RUN CGO_ENABLED=0 GOOS=linux go build -tags=prod \
+  -ldflags "-X github.com/almeidapaulopt/tsdproxy/internal/core.version=${VERSION}" \
+  -o /tsdproxyd ./cmd/server/main.go
 RUN CGO_ENABLED=0 GOOS=linux go build -o /healthcheck ./cmd/healthcheck/main.go
 
 
