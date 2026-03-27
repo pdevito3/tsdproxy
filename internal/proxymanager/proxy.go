@@ -21,7 +21,8 @@ import (
 type (
 	// Proxy struct is a struct that contains all the information needed to run a proxy.
 	Proxy struct {
-		onUpdate func(event model.ProxyEvent)
+		onUpdate  func(event model.ProxyEvent)
+		onRestart func()
 
 		log           zerolog.Logger
 		ctx           context.Context
@@ -32,6 +33,7 @@ type (
 		ports         map[string]*port
 		mtx           sync.RWMutex
 		status        model.ProxyStatus
+		restartable   bool
 	}
 )
 
@@ -81,6 +83,18 @@ func (proxy *Proxy) Start() {
 		go proxy.start()
 		for event := range proxy.providerProxy.WatchEvents() {
 			proxy.setStatus(event.Status)
+		}
+		// Events channel closed — if we're not in a normal shutdown state,
+		// the provider proxy terminated unexpectedly (e.g. stale tsnet state).
+		// Trigger a one-shot restart to recover.
+		status := proxy.GetStatus()
+		if status != model.ProxyStatusStopping && status != model.ProxyStatusStopped {
+			proxy.log.Warn().Msg("provider proxy terminated unexpectedly; attempting restart")
+			proxy.close()
+			if proxy.restartable && proxy.onRestart != nil {
+				proxy.restartable = false
+				go proxy.onRestart()
+			}
 		}
 	}()
 }

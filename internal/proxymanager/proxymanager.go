@@ -322,6 +322,15 @@ func (pm *ProxyManager) newAndStartProxy(name string, proxyConfig *model.Config)
 		pm.broadcastStatusEvents(event)
 	}
 
+	// allow one automatic restart on unexpected provider proxy termination
+	// (e.g. stale tsnet state after container restart)
+	p.restartable = true
+	p.onRestart = func() {
+		pm.log.Info().Str("proxy", name).Msg("restarting proxy after unexpected termination")
+		pm.removeProxy(name)
+		pm.newAndStartProxy(name, proxyConfig)
+	}
+
 	pm.addProxy(p)
 
 	// broadcasts ProxyStatusInitializing

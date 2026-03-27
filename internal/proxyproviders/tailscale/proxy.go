@@ -8,6 +8,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -29,7 +31,8 @@ type Proxy struct {
 	lc       *local.Client
 	ctx      context.Context
 
-	events chan model.ProxyEvent
+	events  chan model.ProxyEvent
+	datadir string
 
 	authURL string
 	url     string
@@ -144,6 +147,13 @@ func (p *Proxy) watchStatus() {
 		}
 
 		if n.ErrMessage != nil {
+			if strings.Contains(*n.ErrMessage, "invalid key") {
+				p.log.Warn().Msg("tailscale backend reported invalid key; removing stale state to allow re-authentication")
+				p.removeStateFile()
+				p.setStatus(model.ProxyStatusError, "", "")
+				close(p.events)
+				return
+			}
 			p.log.Error().Str("error", *n.ErrMessage).Msg("tailscale.watchStatus: backend")
 			return
 		}
@@ -189,6 +199,18 @@ func (p *Proxy) setStatus(status model.ProxyStatus, url string, authURL string) 
 
 	p.events <- model.ProxyEvent{
 		Status: status,
+	}
+}
+
+// removeStateFile removes the tailscaled.state file from the data directory.
+// This is needed when tsnet has stale state that causes it to ignore a valid
+// auth key, resulting in "invalid key: API key does not exist" errors.
+func (p *Proxy) removeStateFile() {
+	stateFile := filepath.Join(p.datadir, "tailscaled.state")
+	if err := os.Remove(stateFile); err != nil && !os.IsNotExist(err) {
+		p.log.Error().Err(err).Str("path", stateFile).Msg("failed to remove stale tailscaled state file")
+	} else {
+		p.log.Info().Str("path", stateFile).Msg("removed stale tailscaled state file")
 	}
 }
 
