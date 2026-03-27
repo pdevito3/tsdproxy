@@ -149,7 +149,7 @@ func (p *Proxy) watchStatus() {
 		if n.ErrMessage != nil {
 			if strings.Contains(*n.ErrMessage, "invalid key") {
 				p.log.Warn().Msg("tailscale backend reported invalid key; removing stale state to allow re-authentication")
-				p.removeStateFile()
+				p.removeStaleFiles()
 				p.setStatus(model.ProxyStatusError, "", "")
 				close(p.events)
 				return
@@ -202,15 +202,20 @@ func (p *Proxy) setStatus(status model.ProxyStatus, url string, authURL string) 
 	}
 }
 
-// removeStateFile removes the tailscaled.state file from the data directory.
-// This is needed when tsnet has stale state that causes it to ignore a valid
-// auth key, resulting in "invalid key: API key does not exist" errors.
-func (p *Proxy) removeStateFile() {
-	stateFile := filepath.Join(p.datadir, "tailscaled.state")
-	if err := os.Remove(stateFile); err != nil && !os.IsNotExist(err) {
-		p.log.Error().Err(err).Str("path", stateFile).Msg("failed to remove stale tailscaled state file")
-	} else {
-		p.log.Info().Str("path", stateFile).Msg("removed stale tailscaled state file")
+// removeStaleFiles removes the tailscaled.state and cached OAuth auth key
+// (tsdproxy.yaml) from the data directory. Both must be removed because:
+//   - tailscaled.state contains the stale node key that tsnet prefers over the auth key
+//   - tsdproxy.yaml caches a single-use OAuth auth key that has already been consumed
+//
+// Removing both ensures the next proxy start gets a fresh auth key and clean state.
+func (p *Proxy) removeStaleFiles() {
+	for _, name := range []string{"tailscaled.state", "tsdproxy.yaml"} {
+		f := filepath.Join(p.datadir, name)
+		if err := os.Remove(f); err != nil && !os.IsNotExist(err) {
+			p.log.Error().Err(err).Str("path", f).Msg("failed to remove stale file")
+		} else if err == nil {
+			p.log.Info().Str("path", f).Msg("removed stale file")
+		}
 	}
 }
 
